@@ -8,7 +8,7 @@ from wordle import *
 from wordle import _ABSENT, _PARTIAL, _PRESENT
 
 WORD_LIST_PATH = os.path.join(os.path.dirname(__file__), 'valid-wordle-words.txt')
-WORD_LIST = []  # WORD_LIST is a list of valid Wordle words
+WORD_LIST = []
 
 vowels = set("aeiouy")
 
@@ -151,10 +151,9 @@ _FALLBACK_SEEDS = ["crane", "slate", "trace", "pleat", "stare", "panel", "flame"
 
 _WORD_INDEX = None
 
-_POW3 = (1, 3, 9, 27, 81)  # base-3 weights per position
+_POW3 = (1, 3, 9, 27, 81)
 
 def _letters_tuple(s: str) -> tuple[int, int, int, int, int]:
-	# convert 'abcde' -> (0,1,2,3,4)
 	return tuple(ord(c) - 97 for c in s)
 
 def _encode_feedback_fast(idx: WordIndex, guess_letters: tuple[int, int, int, int, int], t_idx: int) -> int:
@@ -163,18 +162,16 @@ def _encode_feedback_fast(idx: WordIndex, guess_letters: tuple[int, int, int, in
 	Returns code in base-3 with 0=grey,1=yellow,2=green (LS trit = pos 0).
 	"""
 	t_letters = idx.letters[t_idx]
-	counts = list(idx.counts[t_idx])  # small 26 list; copying is cheap
+	counts = list(idx.counts[t_idx])
 
 	states = [0, 0, 0, 0, 0]
 
-	# pass 1: greens
 	for i in range(5):
 		gl = guess_letters[i]
 		if gl == t_letters[i]:
 			states[i] = 2
 			counts[gl] -= 1
 
-	# pass 2: yellows
 	for i in range(5):
 		if states[i] == 0:
 			gl = guess_letters[i]
@@ -182,7 +179,6 @@ def _encode_feedback_fast(idx: WordIndex, guess_letters: tuple[int, int, int, in
 				states[i] = 1
 				counts[gl] -= 1
 
-	# encode base-3
 	return states[0]*_POW3[0] + states[1]*_POW3[1] + states[2]*_POW3[2] + states[3]*_POW3[3] + states[4]*_POW3[4]
 
 def _get_index():
@@ -312,12 +308,10 @@ def _filter_nonhard_pool(words: list[str],
 		present: dict[int, str],
 		partial: dict[str, set[int]],
 		excluded: set[str]) -> list[str]:
-	# Ignore the passed 'words' and use the index bitmasks
 	idx = _get_index()
 	return idx.filter(present=present, partial=partial, excluded=excluded)
 
 def _adaptive_top_k(n_answers: int) -> tuple[int, int]:
-	# (top_hard, top_probe)
 	if n_answers > 3000:
 		return (80, 120)
 	if n_answers > 1200:
@@ -350,7 +344,6 @@ def _best_joint(idx: WordIndex, hard_candidates: list[str], probe_candidates: li
 		g = random.choice(any_pool)
 		return g, float('inf'), g, float('inf')
 
-	# Union of candidates (preserve order, dedup)
 	union = []
 	seen = set()
 	for lst in (hard_candidates, probe_candidates):
@@ -363,19 +356,17 @@ def _best_joint(idx: WordIndex, hard_candidates: list[str], probe_candidates: li
 	best_any, best_any_exp = None, float('inf')
 	hard_set = set(hard_candidates)
 
-	# Preallocate feedback buckets and small work buffers
 	buckets = [0] * 243
-	used_codes = []			# indices in buckets touched this guess
-	rem = [0] * 26			# remaining counts for non-green letters
-	rem_touched = []		# which letter indices we incremented
+	used_codes = []
+	rem = [0] * 26
+	rem_touched = []
 
 	pow3 = (1, 3, 9, 27, 81)
 	letters = idx.letters
 
 	def encode_fast(guess_letters: tuple[int, int, int, int, int], t_idx: int) -> int:
-		# Greens and build counts of target letters not green
 		t_letters = letters[t_idx]
-		s0 = s1 = s2 = s3 = s4 = 0  # states at positions, 0/1/2
+		s0 = s1 = s2 = s3 = s4 = 0
 		if guess_letters[0] == t_letters[0]: s0 = 2
 		else:
 			k = t_letters[0]; rem[k] += 1; rem_touched.append(k)
@@ -392,7 +383,6 @@ def _best_joint(idx: WordIndex, hard_candidates: list[str], probe_candidates: li
 		else:
 			k = t_letters[4]; rem[k] += 1; rem_touched.append(k)
 
-		# Yellows by remaining counts
 		if s0 == 0:
 			k = guess_letters[0]
 			if rem[k] > 0: s0 = 1; rem[k] -= 1
@@ -409,7 +399,6 @@ def _best_joint(idx: WordIndex, hard_candidates: list[str], probe_candidates: li
 			k = guess_letters[4]
 			if rem[k] > 0: s4 = 1; rem[k] -= 1
 
-		# Reset touched counts (cheap, <=5 letters)
 		for k in rem_touched:
 			rem[k] = 0
 		rem_touched.clear()
@@ -423,7 +412,6 @@ def _best_joint(idx: WordIndex, hard_candidates: list[str], probe_candidates: li
 		sum_sq = 0
 		used_codes.clear()
 
-		# Early pruning against best-so-far
 		for j, t_idx in enumerate(answers_idx):
 			code = encode_fast(guess_letters, t_idx)
 			old = buckets[code]
@@ -446,7 +434,6 @@ def _best_joint(idx: WordIndex, hard_candidates: list[str], probe_candidates: li
 				sum_sq = None
 				break
 
-		# Reset touched buckets
 		for code in used_codes:
 			buckets[code] = 0
 
@@ -475,7 +462,6 @@ def make_guess(prev_guesses: list[WordleResult], hard_mode: bool = False, first_
 				first_guess = random.choice(WORD_LIST) if WORD_LIST else random.choice(_FALLBACK_SEEDS)
 		return first_guess
 	
-	# Also using a similar heuristic for second guess to gain more information
 	if len(prev_guesses) == 1:
 		if not WORD_LIST:
 			return random.choice(_FALLBACK_SEEDS)
@@ -527,14 +513,12 @@ def make_guess(prev_guesses: list[WordleResult], hard_mode: bool = False, first_
 		key=lambda w: _score_by_presence(w, pfreq)
 	)
 
-	# --- evaluate both in a single pass ---
 	answers_idx = [idx.index_by_word[w] for w in answers]
 	hard_guess, hard_exp, any_guess, any_exp = _best_joint(idx, hard_candidates, probe_candidates, answers_idx)
 
 	if hard_mode:
 		return hard_guess
 
-	# choose the one with smaller expected remaining pool
 	return any_guess if any_exp < hard_exp else hard_guess
 
 def play(wordle: Wordle, target: str = None, hard_mode: bool = False, first_guess: str = None, print_guesses: bool = False):
