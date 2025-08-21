@@ -1,13 +1,16 @@
 import argparse
-import os
-import random
-import time
+import csv
 import heapq
 import math
-import sys
+import os
+import matplotlib.pyplot as plt
+import random
 import shutil
+import sys
+import time
 from wordle import *
 from wordle import _ABSENT, _PARTIAL, _PRESENT
+from datetime import datetime
 
 WORD_LIST_PATH = os.path.join(os.path.dirname(__file__), 'valid-wordle-words.txt')
 WORD_LIST = []
@@ -315,12 +318,12 @@ def _filter_nonhard_pool(words: list[str],
 
 def _adaptive_top_k(n_answers: int) -> tuple[int, int]:
 	if n_answers > 3000:
-		return (80, 120)
+		return (160, 240)
 	if n_answers > 1200:
-		return (100, 150)
+		return (200, 300)
 	if n_answers > 400:
-		return (150, 180)
-	return (200, 220)
+		return (300, 360)
+	return (400, 440)
 
 def _presence_freq(words: list[str]) -> dict[str, int]:
 	pf = {chr(a): 0 for a in range(97, 123)}
@@ -523,6 +526,65 @@ def make_guess(prev_guesses: list[WordleResult], hard_mode: bool = False, first_
 
 	return any_guess if any_exp < hard_exp else hard_guess
 
+def _ensure_dir(path: str) -> None:
+	os.makedirs(path, exist_ok=True)
+
+def _write_raw_csv(path: str, runtimes_ms: list[float], guesses: list[int], successes: list[bool]) -> None:
+	with open(path, "w", newline="") as f:
+		w = csv.writer(f)
+		w.writerow(["run", "runtime_ms", "guesses", "success"])
+		for i, (ms, g, s) in enumerate(zip(runtimes_ms, guesses, successes), start=1):
+			w.writerow([i, ms, g, int(s)])
+
+def _hist_ms(values_ms: list[float], title: str, out_path: str) -> None:
+	if not values_ms:
+		return
+	ms = [int(round(v)) for v in values_ms]
+	bins = range(0, max(ms) + 2)
+	plt.figure()
+	plt.hist(ms, bins=bins, edgecolor="black", linewidth=0.5)
+	plt.xlabel("Runtime (ms)")
+	plt.ylabel("Count")
+	plt.title(title)
+	plt.tight_layout()
+	plt.savefig(out_path, dpi=120)
+	plt.close()
+
+def _hist_int(values: list[int], title: str, xlabel: str, out_path: str) -> None:
+	if not values:
+		return
+	lo = min(1, min(values))
+	hi = max(values)
+	edges = [x - 0.5 for x in range(lo, hi + 2)]
+	plt.figure()
+	plt.hist(values, bins=edges, edgecolor="black", linewidth=0.5)
+	plt.xlabel(xlabel)
+	plt.ylabel("Count")
+	plt.title(title)
+	plt.xticks(range(lo, hi + 1))
+	plt.xlim(lo - 0.5, hi + 0.5)
+	plt.tight_layout()
+	plt.savefig(out_path, dpi=120)
+	plt.close()
+
+def _write_series_csv(path: str, runs: int, avg_g: list[float], avg_ms: list[float], fail_pct: list[float]) -> None:
+	with open(path, "w", newline="") as f:
+		w = csv.writer(f)
+		w.writerow(["run", "avg_guesses", "avg_runtime_ms", "fail_pct"])
+		for i in range(runs):
+			w.writerow([i + 1, avg_g[i], avg_ms[i], fail_pct[i]])
+
+def _plot_one(x: list[int], y: list[float], xlabel: str, ylabel: str, title: str, out_path: str) -> None:
+	plt.figure()
+	plt.plot(x, y)
+	plt.xlabel(xlabel)
+	plt.ylabel(ylabel)
+	plt.title(title)
+	plt.grid(True, alpha=0.3)
+	plt.tight_layout()
+	plt.savefig(out_path, dpi=120)
+	plt.close()
+
 def play(wordle: Wordle, target: str = None, hard_mode: bool = False, first_guess: str = None, print_guesses: bool = False):
 	if not WORD_LIST:
 		raise ValueError("WORD_LIST is empty, cannot play Wordle.")
@@ -559,25 +621,50 @@ def _status_line(msg: str) -> None:
 	sys.stdout.write("\r" + msg.ljust(cols))
 	sys.stdout.flush()
 
-def run_benchmark(game: Wordle, runs: int, print_guesses: bool = False) -> dict:
+def run_benchmark(game: Wordle, runs: int, print_guesses: bool = False, collect_series: bool = False) -> dict:
 	total_guesses = 0
 	total_runtime = 0.0
 	fails = 0
+
+	avg_g_series: list[float] = []
+	avg_ms_series: list[float] = []
+	failpct_series: list[float] = []
+
+	# NEW: raw per-run data for histograms
+	runtime_each: list[float] = []
+	guesses_each: list[int] = []
+	success_each: list[bool] = []
 
 	live = not print_guesses
 
 	for i in range(runs):
 		stats = play(game, print_guesses=print_guesses)
+
+		# record raw
+		runtime_each.append(stats["elapsed_time"])
+		guesses_each.append(stats["guesses"])
+		success_each.append(stats["success"])
+
 		if not stats["success"]:
 			fails += 1
 		total_guesses += stats["guesses"] if stats["success"] else 6
 		total_runtime += stats["elapsed_time"]
 
+		sofar = i + 1
+		avg_guesses_so_far = total_guesses / sofar
+		avg_runtime_so_far = total_runtime / sofar
+		fail_pct_so_far = (fails / sofar) * 100.0
+
+		if collect_series:
+			avg_g_series.append(avg_guesses_so_far)
+			avg_ms_series.append(avg_runtime_so_far)
+			failpct_series.append(fail_pct_so_far)
+
 		if live:
-			sofar = i + 1
-			avg_guesses_so_far = total_guesses / sofar
-			avg_runtime_so_far = total_runtime / sofar
-			_status_line(f"Run {sofar}/{runs}  |  avg guesses {avg_guesses_so_far:.2f}  |  avg runtime {avg_runtime_so_far:.2f} ms")
+			_status_line(
+				f"Run {sofar}/{runs}  |  avg guesses {avg_guesses_so_far:.2f}  |  "
+				f"avg runtime {avg_runtime_so_far:.2f} ms | fails {fails} ({fail_pct_so_far:.1f}%)"
+			)
 
 	if live:
 		sys.stdout.write("\n")
@@ -592,6 +679,16 @@ def run_benchmark(game: Wordle, runs: int, print_guesses: bool = False) -> dict:
 		"fails": fails,
 		"fail_pct": fail_pct,
 		"runs": runs,
+		"series": {
+			"avg_guesses": avg_g_series,
+			"avg_runtime_ms": avg_ms_series,
+			"fail_pct": failpct_series,
+		} if collect_series else None,
+		"per_run": {
+			"runtime_ms": runtime_each,
+			"guesses": guesses_each,
+			"success": success_each,
+		},
 	}
 
 def init_words() -> None:
@@ -606,6 +703,8 @@ def init_words() -> None:
 def parse_args() -> argparse.Namespace:
 	parser = argparse.ArgumentParser(description="Wordle solver benchmark")
 	parser.add_argument("-n", "--runs", type=int, default=100, help="number of games to run")
+	parser.add_argument("--plot", action="store_true", help="save running-average plots and CSV")
+	parser.add_argument("--plot-dir", default="plots", help="directory to write plots/CSV (default: plots/)")
 	return parser.parse_args()
 
 def main() -> None:
@@ -615,7 +714,41 @@ def main() -> None:
 	game = Wordle(WORD_LIST)
 	print_guesses = args.runs < 5
 
-	summary = run_benchmark(game, args.runs, print_guesses=print_guesses)
+	summary = run_benchmark(game, args.runs, print_guesses=print_guesses, collect_series=args.plot)
+
+	if args.plot:
+		series = summary["series"]
+		timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") + f"(runs={args.runs})"
+		plot_dir = os.path.join("plots", timestamp)
+		_ensure_dir(plot_dir)
+
+		# CSV
+		csv_path = os.path.join(plot_dir, "running_stats.csv")
+		_write_series_csv(csv_path, args.runs, series["avg_guesses"], series["avg_runtime_ms"], series["fail_pct"])
+		print(f"Wrote {csv_path}")
+
+		# Plots
+		x = list(range(1, args.runs + 1))
+		_plot_one(x, series["avg_guesses"], "Run", "Average guesses", "Running average of guesses",
+			os.path.join(plot_dir, "avg_guesses.png"))
+		_plot_one(x, series["avg_runtime_ms"], "Run", "Average runtime (ms)", "Running average of runtime",
+			os.path.join(plot_dir, "avg_runtime_ms.png"))
+		_plot_one(x, series["fail_pct"], "Run", "Fail rate (%)", "Running fail percentage",
+			os.path.join(plot_dir, "fail_pct.png"))
+
+		# Raw per-run CSV
+		raw_csv = os.path.join(plot_dir, "per_run.csv")
+		_write_raw_csv(raw_csv, summary["per_run"]["runtime_ms"], summary["per_run"]["guesses"], summary["per_run"]["success"])
+		print(f"Wrote {raw_csv}")
+
+		# Histograms
+		_hist_ms(summary["per_run"]["runtime_ms"],
+			"Histogram of runtime (ms)",
+			os.path.join(plot_dir, "hist_runtime_ms.png"))
+		_hist_int(summary["per_run"]["guesses"],
+			"Histogram of guess count",
+			"Guesses",
+			os.path.join(plot_dir, "hist_guesses.png"))
 
 	print(
 		f"Average guesses: {summary['average_guesses']:.2f}, "
