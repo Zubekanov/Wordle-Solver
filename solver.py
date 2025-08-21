@@ -4,6 +4,8 @@ import random
 import time
 import heapq
 import math
+import sys
+import shutil
 from wordle import *
 from wordle import _ABSENT, _PARTIAL, _PRESENT
 
@@ -552,12 +554,17 @@ def play(wordle: Wordle, target: str = None, hard_mode: bool = False, first_gues
 				"success": len(prev_guesses) <= 6
 			}
 
+def _status_line(msg: str) -> None:
+	cols = shutil.get_terminal_size(fallback=(80, 24)).columns
+	sys.stdout.write("\r" + msg.ljust(cols))
+	sys.stdout.flush()
+
 def run_benchmark(game: Wordle, runs: int, print_guesses: bool = False) -> dict:
 	total_guesses = 0
 	total_runtime = 0.0
 	fails = 0
 
-	progress_every = runs / (int(math.log10(runs)) ** 2) if runs >= 10 else None
+	live = not print_guesses
 
 	for i in range(runs):
 		stats = play(game, print_guesses=print_guesses)
@@ -566,10 +573,14 @@ def run_benchmark(game: Wordle, runs: int, print_guesses: bool = False) -> dict:
 		total_guesses += stats["guesses"] if stats["success"] else 6
 		total_runtime += stats["elapsed_time"]
 
-		if progress_every and (i % progress_every == 0):
-			avg_guesses_so_far = total_guesses / (i + 1)
-			avg_runtime_so_far = total_runtime / (i + 1)
-			print(f"Run {i + 1}/{runs}: avg guesses so far {avg_guesses_so_far:.2f}, avg runtime so far {avg_runtime_so_far:.2f} ms")
+		if live:
+			sofar = i + 1
+			avg_guesses_so_far = total_guesses / sofar
+			avg_runtime_so_far = total_runtime / sofar
+			_status_line(f"Run {sofar}/{runs}  |  avg guesses {avg_guesses_so_far:.2f}  |  avg runtime {avg_runtime_so_far:.2f} ms")
+
+	if live:
+		sys.stdout.write("\n")
 
 	avg_guesses = total_guesses / runs
 	avg_runtime = total_runtime / runs
