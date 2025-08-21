@@ -30,26 +30,30 @@ class WordleResult:
 		return " ".join(parts)
 
 class Wordle:
-	def __init__(self, word_list: list, word: str = None):
-		if not word_list:
-			raise ValueError("word_list must be non-empty.")
-		self.word_list = [w.lower() for w in word_list]
-		if word is None:
-			self.word = random.choice(self.word_list)
+	def __init__(self, word_list: list[str], target: str = None):
+		if not word_list or len(word_list) == 0:
+			raise ValueError("word_list is absent.")
+		self.word_list = word_list
+		if target:
+			if target not in word_list:
+				raise ValueError(f"Target word '{target}' is not in the word list.")
+			self.target = target
 		else:
-			word = word.lower()
-			if word in self.word_list:
-				self.word = word
-			else:
-				raise ValueError(f"Invalid word not in word_list: {word}")
-		if len(self.word) != 5:
-			raise ValueError("Target word must be exactly 5 letters long.")
+			self.target = self.randomise_target()
 
+	def randomise_target(self):
+		self.target = random.choice(self.word_list)
+	
+	def set_target(self, target: str):
+		if target not in self.word_list:
+			raise ValueError(f"Target word '{target}' is not in the word list.")
+		self.target = target
+		
 	def guess(self, word: str) -> WordleResult:
 		if len(word) != 5:
 			raise ValueError("Word must be exactly 5 letters long.")
-		guess = word.lower()
-		target = self.word
+		guess = word
+		target = self.target
 
 		result = [_ABSENT] * 5
 		remaining: dict[str, int] = {}
@@ -71,9 +75,3 @@ class Wordle:
 					result[i] = _ABSENT
 
 		return WordleResult(guess, result)
-
-if __name__ == "__main__":
-	game = Wordle(["apple"])
-	print(game.guess("llama"))
-	print(game.guess("apple"))
-	print(game.guess("papal"))
